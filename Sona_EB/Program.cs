@@ -17,15 +17,17 @@ namespace SonaEB
 {
 	class Program
 	{
-		const string version = "1.0.0.0";
+		const string version = "1.0.0.1";
 		static Spell.Active Q, W, E;
 		static Spell.Skillshot R;
-		static Menu Menu, SettingsMenu, DrawMenu, MiscMenu;
+		static Menu Menu, SettingsMenu, DrawMenu, MiscMenu, SkinMenu;
+		static Slider skinSelect, skinSelect2;
 		static Vector3 mousePos = Game.CursorPos;
 		static AIHeroClient Player = ObjectManager.Player;
 		static CheckBox R_Combo, R_Smart_Combo;
 		static float Dmg = 0f;
-		
+		static string[] skins = {"Classic", "Muse", "Pentakill", "Silent Night", "Guqin", "Arcade", "DJ"};
+		static string[] DJTrans = {"Kinetic", "Concussive", "Ethereal"};
 		static void Main(string[] args)
 		{
 			Loading.OnLoadingComplete += Loading_OnLoadingComplete;
@@ -81,8 +83,9 @@ namespace SonaEB
 			MiscMenu.Add("AntiGapCloser", new CheckBox("Anti GapCloser"));
 			MiscMenu.Add("SmartHeal", new CheckBox("Smart Heal"));
 			MiscMenu.Add("SaveAllyR", new CheckBox("Save dying ally R"));
+			MiscMenu.Add("InterruptR", new CheckBox("Interrupt R"));
 			
-			DrawMenu = Menu.AddSubMenu("Drawing settings", "drawinsSection");
+			DrawMenu = Menu.AddSubMenu("Drawing settings", "DrawingSettings");
 			DrawMenu.AddGroupLabel("Drawins settings");
 			DrawMenu.AddSeparator();
 			DrawMenu.Add("Available_Draw", new CheckBox("Only Draw Available Skill",false));
@@ -90,13 +93,55 @@ namespace SonaEB
 			DrawMenu.Add("W_Draw", new CheckBox("Draw W & R range",false));
 			DrawMenu.Add("E_Draw", new CheckBox("Draw E range",false));
 			
+			SkinMenu = Menu.AddSubMenu("Skin Change");
+			SkinMenu.AddGroupLabel("Skins");
+			
+			skinSelect = SkinMenu.Add("ChangeSkin", new Slider("DJ Sona", 6, 0, 6));
+			skinSelect.OnValueChange += delegate(ValueBase<int> sender, ValueBase<int>.ValueChangeArgs a)
+			{
+				skinSelect.DisplayName = skins[a.NewValue]+ " Sona";
+				
+				if (a.NewValue == 6)
+				{
+					skinSelect2.IsVisible= true;
+					DJTransform(skinSelect2.CurrentValue);
+				}
+				else
+				{
+					skinSelect2.IsVisible= false;
+					Player.SetModel("Sona");
+				}
+				Player.SetSkinId(a.NewValue);
+			};
+			Player.SetModel("SonaDJGenre01");
+			Player.SetSkinId(6);
+			
+			SkinMenu.AddSeparator();
+			SkinMenu.AddGroupLabel("DJ Sona Transformation");
+			
+			skinSelect2 = SkinMenu.Add("DJSonaChangeSkin", new Slider("Kinetic", 0, 0, 2));
+			skinSelect2.OnValueChange += delegate(ValueBase<int> sender, ValueBase<int>.ValueChangeArgs a)
+			{
+				skinSelect2.DisplayName = DJTrans[a.NewValue];
+				if (Player.SkinId == 6)
+					DJTransform(a.NewValue);
+			};
 			
 			Game.OnTick += Game_OnTick;
 			Drawing.OnDraw += OnDraw;
 			Gapcloser.OnGapcloser += GapCloser;
 			Obj_AI_Base.OnProcessSpellCast += OnProcessSpellCast;
+			Interrupter.OnInterruptableSpell += Interrupter_OnInterruptableSpell;
 			Chat.Print( "<font color='#FFFFFF'> EB Sona "+ version + "</font>");
-			
+		}
+		static void DJTransform(int index)
+		{
+			switch (index)
+			{
+				case 0:Player.SetModel("SonaDJGenre01");break;
+				case 1:Player.SetModel("SonaDJGenre02");break;
+				case 2:Player.SetModel("SonaDJGenre03");break;
+			}
 		}
 		public static int CountEnemiesInRange(Vector3 CastStartPosition , Vector3 CastEndPosition, float width)
 		{
@@ -127,9 +172,23 @@ namespace SonaEB
 				}
 			}
 		}
-		public static void OnProcessSpellCast(Obj_AI_Base sender, GameObjectProcessSpellCastEventArgs args)
+		public static void Interrupter_OnInterruptableSpell(Obj_AI_Base sender, Interrupter.InterruptableSpellEventArgs e)
 		{
 			
+			if (MiscMenu["InterruptR"].Cast<CheckBox>().CurrentValue && R.IsReady() && e.DangerLevel.HasFlag(DangerLevel.High) &&
+			    sender.IsValidTarget(R.Range) && sender.Team != Player.Team)
+			{
+				var ally = EntityManager.Heroes.Allies.FirstOrDefault(x => x.Distance(sender) < 600);
+				if (ally == null) return;
+				
+				var pred = R.GetPrediction(sender);
+				if (pred.HitChance >= HitChance.High)
+					R.Cast(pred.CastPosition);
+			}
+		}
+		public static void OnProcessSpellCast(Obj_AI_Base sender, GameObjectProcessSpellCastEventArgs args)
+		{
+			//Chat.Print(sender.BaseSkinName);
 			if (sender.IsEnemy  && !Player.IsDead  && !args.Target.IsDead && 
 			    args.Target.Type == GameObjectType.AIHeroClient && sender.Type == GameObjectType.AIHeroClient &&
 			    ((args.Target.IsMe) || (args.Target.IsAlly && Player.Distance(args.Target) < W.Range-50))    )
@@ -207,7 +266,7 @@ namespace SonaEB
 		{
 			
 			KillSteal();
-			R_Logic();
+			
 			
 			if (MiscMenu["SmartHeal"].Cast<CheckBox>().CurrentValue && W.IsReady())
 			{
@@ -233,6 +292,7 @@ namespace SonaEB
 		private static void Combo()
 		{
 			
+			
 			var target = TargetSelector.GetTarget(R.Range, DamageType.Magical);
 			var useQ = SettingsMenu["Q_Combo"].Cast<CheckBox>().CurrentValue;
 			var useR = SettingsMenu["R_Combo"].Cast<CheckBox>().CurrentValue;
@@ -252,6 +312,8 @@ namespace SonaEB
 					Core.DelayAction(() => EloBuddy.Player.IssueOrder(GameObjectOrder.AttackUnit, target),400);
 				}
 			}
+			else
+				R_Logic();
 			/*
             foreach (var element in target.Buffs) {
             		Chat.Print(element.Name);}
