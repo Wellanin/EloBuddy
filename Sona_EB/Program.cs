@@ -17,11 +17,11 @@ namespace SonaEB
 {
 	class Program
 	{
-		const string version = "1.0.0.1";
+		const string version = "1.0.0.2";
 		static Spell.Active Q, W, E;
 		static Spell.Skillshot R;
 		static Menu Menu, SettingsMenu, DrawMenu, MiscMenu, SkinMenu;
-		static Slider skinSelect, skinSelect2;
+		static Slider skinSelect, skinSelect2, R_enemies_count;
 		static Vector3 mousePos = Game.CursorPos;
 		static AIHeroClient Player = ObjectManager.Player;
 		static CheckBox R_Combo, R_Smart_Combo;
@@ -52,18 +52,7 @@ namespace SonaEB
 			SettingsMenu.AddLabel("Combo");
 			SettingsMenu.Add("Q_Combo", new CheckBox("Use Q on Combo"));
 			// SettingsMenu.Add("E_Combo", new CheckBox("Use E on Combo"));
-			
-			R_Combo = SettingsMenu.Add("R_Combo", new CheckBox("Use R on Combo",false));
-			R_Combo.OnValueChange += delegate
-			{
-				if (R_Combo.CurrentValue)
-					R_Smart_Combo.CurrentValue = false;
-				
-				else
-					if (R_Smart_Combo.CurrentValue == false)
-						R_Smart_Combo.CurrentValue = true;
-			};
-			R_Smart_Combo = SettingsMenu.Add("R_Smart_Combo", new CheckBox("Use Smart R on Combo"));
+			R_Smart_Combo = SettingsMenu.Add("R_Smart_Combo", new CheckBox("Use Smart R on Combo",false));
 			R_Smart_Combo.OnValueChange += delegate
 			{
 				if (R_Smart_Combo.CurrentValue)
@@ -72,10 +61,32 @@ namespace SonaEB
 					if (R_Combo.CurrentValue == false)
 						R_Combo.CurrentValue = true;
 			};
+			R_Combo = SettingsMenu.Add("R_Combo", new CheckBox("Use R on Combo"));
+			R_Combo.OnValueChange += delegate
+			{
+				if (R_Combo.CurrentValue)
+				{
+					R_Smart_Combo.CurrentValue = false;
+					R_enemies_count.IsVisible = true;
+				}
+				else
+				{
+					R_enemies_count.IsVisible = false;
+					if (R_Smart_Combo.CurrentValue == false)
+						R_Smart_Combo.CurrentValue = true;
+				}
+			};
+			R_enemies_count = SettingsMenu.Add("ChangeSkin", new Slider("R Combo Count 1", 1, 1, 5));
+			R_enemies_count.OnValueChange += delegate(ValueBase<int> sender, ValueBase<int>.ValueChangeArgs a)
+			{
+				R_enemies_count.DisplayName = "R Combo Count "+ a.NewValue;
+			};
 			
+			SettingsMenu.AddSeparator();
 			SettingsMenu.AddLabel("KillSteal");
 			SettingsMenu.Add("Q_KillSteal", new CheckBox("Use Q KillSteal",false));
 			
+			SettingsMenu.AddSeparator();
 			SettingsMenu.AddLabel("Harass");
 			SettingsMenu.Add("Q_Harass", new CheckBox("Use Q on Harass"));
 			
@@ -105,16 +116,18 @@ namespace SonaEB
 				{
 					skinSelect2.IsVisible= true;
 					DJTransform(skinSelect2.CurrentValue);
+					Player.SetSkinId(a.NewValue);
 				}
 				else
 				{
 					skinSelect2.IsVisible= false;
-					Player.SetModel("Sona");
+					Player.SetSkin("Sona", a.NewValue);
 				}
-				Player.SetSkinId(a.NewValue);
+				
 			};
-			Player.SetModel("SonaDJGenre01");
-			Player.SetSkinId(6);
+			//Player.SetModel("SonaDJGenre01");
+			//Player.SetSkinId(6);
+			Player.SetSkin("SonaDJGenre01", 6);
 			
 			SkinMenu.AddSeparator();
 			SkinMenu.AddGroupLabel("DJ Sona Transformation");
@@ -134,13 +147,14 @@ namespace SonaEB
 			Interrupter.OnInterruptableSpell += Interrupter_OnInterruptableSpell;
 			Chat.Print( "<font color='#FFFFFF'> EB Sona "+ version + "</font>");
 		}
+
 		static void DJTransform(int index)
 		{
 			switch (index)
 			{
-				case 0:Player.SetModel("SonaDJGenre01");break;
-				case 1:Player.SetModel("SonaDJGenre02");break;
-				case 2:Player.SetModel("SonaDJGenre03");break;
+					case 0:Player.SetModel("SonaDJGenre01");break;
+					case 1:Player.SetModel("SonaDJGenre02");break;
+					case 2:Player.SetModel("SonaDJGenre03");break;
 			}
 		}
 		public static int CountEnemiesInRange(Vector3 CastStartPosition , Vector3 CastEndPosition, float width)
@@ -150,6 +164,7 @@ namespace SonaEB
 			if (target != null)
 				return target.Count();
 			return 0;
+			
 		}
 		static void R_Logic()
 		{
@@ -284,33 +299,41 @@ namespace SonaEB
 			{
 				Harass();
 			}
-			
-			
-			
 		}
 		
 		private static void Combo()
 		{
-			
-			
 			var target = TargetSelector.GetTarget(R.Range, DamageType.Magical);
 			var useQ = SettingsMenu["Q_Combo"].Cast<CheckBox>().CurrentValue;
 			var useR = SettingsMenu["R_Combo"].Cast<CheckBox>().CurrentValue;
-			
 			if (useQ && Q.IsReady() && !target.IsDead && !target.IsZombie && target.IsValidTarget(Q.Range))
 			{
 				Q.Cast();
 				Core.DelayAction(() => EloBuddy.Player.IssueOrder(GameObjectOrder.AttackUnit, target),300);
 			}
 			
-			if (useR && R.IsReady() && !target.IsDead && !target.IsZombie && target.IsValidTarget(R.Range))
+			if (useR && !target.IsDead && !target.IsZombie && target.IsValidTarget(R.Range))
 			{
-				var pred = R.GetPrediction(target);
-				if (pred.HitChance >= HitChance.High)
+				var Rtarget = EntityManager.Heroes.Enemies.Where(a => a.IsValidTarget(R.Range)
+				                                                 && !a.IsDead && !a.IsZombie)
+					.OrderByDescending( a => a.Distance(Player));
+				
+				if (Rtarget == null && Rtarget.Count()< R_enemies_count.CurrentValue) return;
+				
+				var pred = R.GetPrediction(Rtarget.FirstOrDefault());
+				if (pred.HitChance < HitChance.Collision) return;
+				var R_furthest_target = pred.CastPosition;
+				int enemy_in_R = 0;
+				foreach (var enemy in Rtarget)
 				{
-					R.Cast(pred.CastPosition);
-					Core.DelayAction(() => EloBuddy.Player.IssueOrder(GameObjectOrder.AttackUnit, target),400);
+					var pred2 = R.GetPrediction(enemy);
+					if (pred2.HitChance >= HitChance.Collision)
+						if (pred2.CastPosition.Distance(Player.Position.To2D(), R_furthest_target.To2D() ) < R.Width)
+							enemy_in_R += 1;
 				}
+				
+				if (enemy_in_R >= R_enemies_count.CurrentValue && R.IsReady() )
+					R.Cast(R_furthest_target);
 			}
 			else
 				R_Logic();
@@ -321,6 +344,7 @@ namespace SonaEB
 		}
 		private static void Harass()
 		{
+		
 			if (SettingsMenu["Q_Harass"].Cast<CheckBox>().CurrentValue && Q.IsReady())
 			{
 				var target = TargetSelector.GetTarget(Q.Range, DamageType.Magical);
@@ -363,6 +387,7 @@ namespace SonaEB
 				new Circle() { Color = Color.GreenYellow, BorderWidth = 1, Radius = E.Range }.Draw(Player.Position);
 			}
 			
+			/*
 			var	minions = ObjectManager.Get<Obj_AI_Minion>()
 				.Where(x => x.Distance(Player) < Q.Range && x.Team != Player.Team && !x.IsZombie && ! x.IsDead)
 				.OrderBy(x => x.Distance(Player))
@@ -373,7 +398,7 @@ namespace SonaEB
 			foreach (var element in minions) {
 				new Circle() { Color = Color.GreenYellow, BorderWidth = 1, Radius = 100 }.Draw(element.Position);
 			}
-			
+			*/
 			
 		}
 		private static void GapCloser(AIHeroClient sender, Gapcloser.GapcloserEventArgs e)
